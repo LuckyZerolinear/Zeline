@@ -187,6 +187,29 @@ class NormalizeNumberTests(unittest.TestCase):
         self.assertEqual(_normalize_number("+62 812-3456-789"), "+628123456789")
 
 
+class AuthHelpTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = WhatsAppConnector()
+
+    def test_auth_help_exists_and_is_cloud_api(self):
+        help_text = getattr(self.conn, "auth_help", "")
+        self.assertTrue(help_text, "auth_help must be set so the CLI can explain")
+        self.assertIn("Cloud API", help_text)
+        # Must steer operators away from expecting a QR / linked-device flow.
+        self.assertIn("QR", help_text)
+
+    def test_missing_credentials_error_is_actionable(self):
+        result = self.conn.connect()
+        self.assertTrue(result.startswith("ERROR:"))
+        self.assertIn("zeline connect whatsapp", result)
+
+    def test_rejected_credentials_error_mentions_causes(self):
+        fake = FakeResponse({"error": {"message": "bad token"}}, status=401)
+        with mock.patch("requests.get", return_value=fake):
+            result = self.conn.connect(access_token="BAD", phone_number_id="12345")
+        self.assertIn("expired", result)
+        self.assertIn("phone number ID", result)
+
 class RegistryTests(unittest.TestCase):
     def test_whatsapp_registered(self):
         from zeline.connectors import get

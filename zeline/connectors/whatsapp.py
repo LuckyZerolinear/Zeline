@@ -5,6 +5,12 @@ WhatsApp Business Cloud API access token plus the phone number ID from the
 Meta Developer dashboard. The token is validated (GET the phone number's
 profile) before anything is stored.
 
+This connector speaks **only** the official Cloud API (token + phone number
+ID). It does not do the QR / linked-device (Baileys-style) pairing flow, so
+``zeline connect whatsapp`` is not "scan a QR to link your personal number".
+:attr:`auth_help` spells that out and is printed by the CLI before it prompts
+for credentials.
+
 https://developers.facebook.com/docs/whatsapp/cloud-api
 """
 from __future__ import annotations
@@ -34,6 +40,24 @@ class WhatsAppConnector(BaseConnector):
     description = "Send WhatsApp messages via the Business Cloud API."
     auth_kind = "token"
 
+    #: Shown by ``zeline connect whatsapp`` before it prompts, so the operator
+    #: knows this is the Cloud API route (and not a QR / linked-device pair).
+    auth_help = (
+        "This links the WhatsApp *Business Cloud API* (Meta), not a QR "
+        "linked-device session.\n"
+        "You need three things from the Meta Developer dashboard "
+        "(https://developers.facebook.com/apps):\n"
+        "  1. a permanent access token  (WhatsApp > API Setup)\n"
+        "  2. the phone number ID        (WhatsApp > API Setup)\n"
+        "  3. the business account ID    (optional, for templates)\n"
+        "Note: only numbers registered to that WhatsApp Business account can "
+        "receive messages, and free-form text only reaches users who messaged "
+        "you in the last 24 h — otherwise use a pre-approved template.\n"
+        "Looking to pair your personal number by scanning a QR? That is a "
+        "different, unofficial bridge (linked-device / Baileys) and is not "
+        "what this connector does."
+    )
+
     def connect(
         self,
         access_token: str = "",
@@ -45,7 +69,11 @@ class WhatsAppConnector(BaseConnector):
         phone_number_id = (phone_number_id or kwargs.get("phone_number_id") or "").strip()
         business_account_id = (business_account_id or kwargs.get("business_account_id") or "").strip()
         if not access_token or not phone_number_id:
-            return "ERROR: access_token and phone_number_id are required."
+            return (
+                "ERROR: both a Cloud API access token and a phone number ID "
+                "are required (see the notes above). Get them from the Meta "
+                "Developer dashboard, then re-run `zeline connect whatsapp`."
+            )
         try:
             resp = requests.get(
                 f"{API_BASE}/{phone_number_id}",
@@ -56,7 +84,12 @@ class WhatsAppConnector(BaseConnector):
         except requests.RequestException as exc:
             return f"ERROR: could not reach graph.facebook.com ({exc})."
         if resp.status_code != 200:
-            return f"ERROR: WhatsApp rejected the credentials (HTTP {resp.status_code})."
+            return (
+                f"ERROR: WhatsApp rejected the credentials (HTTP "
+                f"{resp.status_code}). Check that the access token has not "
+                "expired and that the phone number ID belongs to the same "
+                "WhatsApp Business app."
+            )
         data = resp.json()
         number = data.get("display_phone_number", "?")
         verified = data.get("verified_name", "")

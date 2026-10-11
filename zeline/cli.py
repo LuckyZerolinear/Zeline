@@ -1553,6 +1553,10 @@ def cmd_connect(service: str | None, code: str = "") -> int:
     if service == "whatsapp":
         import getpass
 
+        help_text = getattr(conn, "auth_help", "")
+        if help_text:
+            print(help_text)
+            print()
         access_token = getpass.getpass("WhatsApp Cloud API access token: ").strip()
         phone_number_id = input("Phone number ID: ").strip()
         business_account_id = input("Business account ID (optional): ").strip()
