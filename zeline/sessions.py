@@ -295,16 +295,42 @@ class SessionStore:
         r"\bstop\b", r"\bberhenti\b", r"\bbatal\b", r"\bcancel\b",
         r"\bhentikan\b", r"\burgent\b",
         r"\btunggu\s+dulu\b",
+        r"\bwait\b", r"\bhold\b",
+    )
+
+    # Frasa sopan yang MENGANDUNG kata hard tapi artinya kebalikkannya.
+    # Dicek lebih dulu: "jangan lupa tambahin test" itu permintaan nambah,
+    # bukan perintah berhenti. Tanpa ini, \bjangan\b menelan kalimat biasa.
+    _URGENT_NEGATORS = (
+        r"\bjangan\s+lupa\b", r"\bjangan\s+sampai\s+lupa\b",
+    )
+
+    # Kata imperatif yang SANGAT SERING dipakai sebagai bahasa biasa:
+    # "ganti font ke Inter" / "ubah warna" / "buatin tombol skip" itu
+    # refinement detail, bukan redirect. Urgent HANYA kalau kalimatnya pendek
+    # (<= 8 kata) -- kalimat panjang yang mendeskripsikan sesuatu biasanya
+    # bukan perintah.
+    _URGENT_AMBIGUOUS_PATTERNS = (
         r"\bkoreksi\b", r"\brevisi\b",
         r"\bprioritas\w*\b", r"\bduluan\b",
         r"\bcepet\b", r"\bcepat\b",
-        # Perintah imperatif yang jelas ingin mengganti arah task sekarang:
-        r"\bjangan\b", r"\bganti\b", r"\bubah\b",
+        r"\bjangan\b",
         r"\bsalah\b", r"\bbukan\b", r"\bmalah\b",
-        # Tambahan: frasa umum yang user pakai saat mau redirect task:
-        r"\bpindah\b", r"\bskip\b", r"\blewati\b", r"\babai\b",
-        r"\bfokus\b", r"\bulang\b", r"\bredo\b",
-        r"\bwait\b", r"\bhold\b",
+        r"\bulang\b", r"\bredo\b",
+    )
+
+    # Kata yang bisa jadi PERINTAH ("skip bagian login") tapi juga sering cuma
+    # jadi KATA BENDA/fitur di tengah kalimat ("buatin tombol skip di modal").
+    # Cuma urgent kalau ia berperan sebagai perintah: di awal kalimat, atau
+    # didahului pemicu imperatif.
+    _URGENT_IMPERATIVE_VERBS = (
+        r"skip", r"lewati", r"abai", r"pindah", r"ganti", r"ubah", r"fokus",
+    )
+    # Kata/frasa yang, kalau muncul sebelum verb di atas, menandakan perintah.
+    _URGENT_IMPERATIVE_TRIGGERS = (
+        r"\b(?:tolong|please|langsung|tinggal|coba|gas|ayo|yuk|mohon|oke)\b",
+        r"\b(?:jangan|gak\s+usah|ga\s+usah|gausah|nggak\s+usah|jgn)\b",
+        r"\b(?:bisa|bisakah|boleh)\b",
     )
 
     # Patterns that are urgent ONLY when the message is SHORT (<=8 words) —
@@ -328,12 +354,41 @@ class SessionStore:
         - Plain questions ("btw harga eth berapa") → ordinary steer (waits).
         """
         low = f" {text.strip().lower()} "
+        # Frasa sopan menang atas kata di dalamnya: "jangan lupa X" = X diminta,
+        # bukan "jangan" sebagai perintah berhenti.
+        if any(re.search(p, low) for p in self._URGENT_NEGATORS):
+            return False
         if any(re.search(p, low) for p in self._URGENT_HARD_PATTERNS):
             return True
         word_count = len(text.strip().split())
         if word_count <= 8:
+            if any(re.search(p, low) for p in self._URGENT_AMBIGUOUS_PATTERNS):
+                return True
+            if self._is_imperative_verb(low):
+                return True
             if any(re.search(p, low) for p in self._URGENT_SHORT_PATTERNS):
                 return True
+        return False
+
+    def _is_imperative_verb(self, low: str) -> bool:
+        """True kalau salah satu verb ambigu dipakai sebagai PERINTAH.
+
+        "skip bagian login"        -> perintah   (verb di awal)
+        "tolong skip yang itu"     -> perintah   (ada pemicu)
+        "buatin tombol skip"       -> BUKAN      (skip = nama tombol)
+        "warna skip dong"          -> BUKAN
+        """
+        words = low.split()
+        first_word = words[0] if words else ""
+        for verb in self._URGENT_IMPERATIVE_VERBS:
+            for m in re.finditer(r"\b" + verb + r"\b", low):
+                before = low[: m.start()]
+                # (a) verb adalah kata PERTAMA: "skip bagian login"
+                if not before.strip() and first_word == verb:
+                    return True
+                # (b) ada pemicu imperatif di depannya: "tolong skip yang itu"
+                if any(re.search(t, before) for t in self._URGENT_IMPERATIVE_TRIGGERS):
+                    return True
         return False
 
     def progress(self, identity: str) -> tuple[int, int, float] | None:
